@@ -1,0 +1,71 @@
+{
+  "list": {
+    "运营商": {
+      "和彩云": {
+        "link": "https://img.mcloud.139.com/material_prod/material_media/20221128/1669626861087.png",
+        "status": true,
+        "webVisible": true,
+        "method": "GET",
+        "httpProtocol": "AUTO",
+        "enhanced": false,
+        "testMode": "DOWNLOAD"
+      },
+      "天翼云桌面": {
+        "link": "https://desk.ctyun.cn:8999/desktop-prod/software/windows_tob_client/15/64/202030001/CtyunClouddeskUniversal_2.3.0_202030001_x86_20240327104015_Setup.exe",
+        "status": true,
+        "webVisible": true,
+        "method": "GET",
+        "httpProtocol": "AUTO",
+        "enhanced": false,
+        "testMode": "DOWNLOAD"
+      }
+    },
+    "全球[Global]": {
+      "Cachefly": {
+        "link": "https://web1.cachefly.net/speedtest/downloading",
+        "status": true,
+        "webVisible": true,
+        "method": "GET",
+        "httpProtocol": "AUTO",
+        "enhanced": false,
+        "testMode": "DOWNLOAD"
+      },
+      "Cloudflare Speed": {
+        "link": "https://speed.cloudflare.com/__down?bytes=99614720",
+        "status": true,
+        "webVisible": true,
+        "method": "GET",
+        "httpProtocol": "AUTO",
+        "enhanced": false,
+        "testMode": "DOWNLOAD"
+      },
+      "Steam Akamai": {
+        "link": "https://cdn.akamai.steamstatic.com/steam/apps/1063730/extras/NW_Sword_Sorcery_2.gif",
+        "status": true,
+        "webVisible": true,
+        "method": "GET",
+        "httpProtocol": "AUTO",
+        "enhanced": false,
+        "testMode": "DOWNLOAD"
+      },
+      "Steam Cloudflare": {
+        "link": "https://cdn.cloudflare.steamstatic.com/steam/apps/1063730/extras/NW_Sword_Sorcery_2.gif",
+        "status": true,
+        "webVisible": true,
+        "method": "GET",
+        "httpProtocol": "AUTO",
+        "enhanced": false,
+        "testMode": "DOWNLOAD"
+      },
+      "Microsoft Akamai": {
+        "link": "https://img-prod-cms-rt-microsoft-com.akamaized.net/cms/api/am/imageFileData/RW16Ptm",
+        "status": true,
+        "webVisible": true,
+        "method": "GET",
+        "httpProtocol": "AUTO",
+        "enhanced": false,
+        "testMode": "DOWNLOAD"
+      }
+    }
+  }
+}

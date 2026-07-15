@@ -1,0 +1,26 @@
+{
+  "name": "FlowLoss",
+  "short_name": "FlowLoss",
+  "description": "实时感知网络质量，精准定位连接异常",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-fill.png",
+      "sizes": "144x144",
+      "type": "image/png"
+    }
+  ]
+}
