@@ -305,7 +305,8 @@ export const useUserStore = defineStore('user', () => {
       } else {
         loginError.value = resp.msg || resp.message || '绑定失败，请检查 QQ 号码'
       }
-      return { status: resp.code ?? 0, ...resp }
+      const status = resp.code ?? (typeof resp.statusCode === 'number' ? -resp.statusCode : -1)
+      return { ...resp, status }
     } catch (e: any) {
       loginError.value = e?.message || '绑定服务异常，请稍后重试'
       return { status: -2, msg: loginError.value }
