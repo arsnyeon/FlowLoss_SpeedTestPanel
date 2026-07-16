@@ -29,6 +29,8 @@ let stepLength = 1
 let speedTemp: number[] = []
 let tasks: number[] = []
 let cronTask = 0
+let logUploadChain: Promise<void> = Promise.resolve()
+let logUploadGeneration = 0
 let rotationBytesAtSwitch = 0
 let rotationRunCounts: number[] = []
 let rotationCurrentIndex = 0
@@ -280,58 +282,74 @@ export function useSpeedRunner(target?: ChartTarget | null) {
     }
   }
 
-  async function uploadLog(isFinal = false) {
-    const nowTime = Date.now() / 1000
-    const used = panel.bytesUsed - loggedBytes
-    const time = nowTime - lastLogTime
-    loggedBytes = panel.bytesUsed
-    lastLogTime = nowTime
+  function uploadLog(isFinal = false) {
+    const generation = logUploadGeneration
+    const sessionId = speedSessionId
+    logUploadChain = logUploadChain.catch(() => undefined).then(async () => {
+      if (generation !== logUploadGeneration || sessionId !== speedSessionId) return
 
-    const nodesStore = useNodesStore()
-    const allNodes = Object.values(nodesStore.groupedNodes).flat()
-    const currentNode = allNodes.find(n => n.url === settings.urlValue)
-    const reportUrl = settings.groupMode ? `group:${settings.groupValue}` : settings.urlValue
-    const urlName = settings.groupMode ? settings.groupValue : currentNode?.title || undefined
+      const nowTime = Date.now() / 1000
+      const reportBytes = panel.bytesUsed
+      const used = reportBytes - loggedBytes
+      const time = nowTime - lastLogTime
+      if (used <= 0) {
+        lastLogTime = nowTime
+        return
+      }
+      if (time <= 0) return
 
-    try {
-      const groupNodes = settings.groupMode ? activeGroupNodes() : []
-      const resp = await user.uploadLog(used, time, reportUrl, settings.threadNum, urlName, {
-        sessionId: speedSessionId,
-        direction: 'DOWNLOAD',
-        downloadBytes: used,
-        uploadBytes: 0,
-        testMode: settings.groupMode ? 'GROUP' : 'SINGLE',
-        groupName: settings.groupMode ? settings.groupValue : undefined,
-        nodeCount: settings.groupMode ? groupNodes.length : 1,
-        groupNodes: settings.groupMode
-          ? groupNodes.map(node => ({
-              title: node.title,
-              url: node.url,
-              direction: 'DOWNLOAD' as const,
-              method: node.method || 'GET',
-              httpProtocol: 'AUTO' as const,
-              enhanced: false,
-            }))
-          : undefined,
-        downloadThreadNum: settings.threadNum,
-        uploadThreadNum: 0,
-        clientType: 'WEB',
-        isFinal,
-      })
-      if (user.isLoggedIn && resp?.status === -1) {
-        user.token = ''
-        user.uin = '10000'
-        user.isLoggedIn = false
-        panel.lastError = '账号状态异常，已自动下线'
+      const nodesStore = useNodesStore()
+      const allNodes = Object.values(nodesStore.groupedNodes).flat()
+      const currentNode = allNodes.find(n => n.url === settings.urlValue)
+      const reportUrl = settings.groupMode ? `group:${settings.groupValue}` : settings.urlValue
+      const urlName = settings.groupMode ? settings.groupValue : currentNode?.title || undefined
+
+      try {
+        const groupNodes = settings.groupMode ? activeGroupNodes() : []
+        const resp = await user.uploadLog(used, time, reportUrl, settings.threadNum, urlName, {
+          sessionId,
+          direction: 'DOWNLOAD',
+          downloadBytes: used,
+          uploadBytes: 0,
+          testMode: settings.groupMode ? 'GROUP' : 'SINGLE',
+          groupName: settings.groupMode ? settings.groupValue : undefined,
+          nodeCount: settings.groupMode ? groupNodes.length : 1,
+          groupNodes: settings.groupMode
+            ? groupNodes.map(node => ({
+                title: node.title,
+                url: node.url,
+                direction: 'DOWNLOAD' as const,
+                method: node.method || 'GET',
+                httpProtocol: 'AUTO' as const,
+                enhanced: false,
+              }))
+            : undefined,
+          downloadThreadNum: settings.threadNum,
+          uploadThreadNum: 0,
+          clientType: 'WEB',
+          isFinal,
+        })
+        if (generation !== logUploadGeneration || sessionId !== speedSessionId) return
+        if (user.isLoggedIn && resp?.status === -1) {
+          user.token = ''
+          user.uin = '10000'
+          user.isLoggedIn = false
+          panel.lastError = '账号状态异常，已自动下线'
+        }
+        if (resp?.status === -2) {
+          panel.isRunning = false
+          panel.dailyLimitReached = true
+          panel.lastWarning = '今日测试流量已达上限，已被限制'
+        }
+        if (resp?.status === 0) {
+          loggedBytes = reportBytes
+          lastLogTime = nowTime
+        }
+      } catch {
+        // 上报失败不能中断测速，未提交的流量留给本次会话下一次上报。
       }
-      if (resp?.status === -2) {
-        panel.isRunning = false
-        panel.dailyLimitReached = true
-        panel.lastWarning = '今日测试流量已达上限，已被限制'
-      }
-    } catch {
-      // 上报失败不能中断测速。
-    }
+    })
+    return logUploadChain
   }
 
   function secEvent() {
@@ -459,6 +477,8 @@ export function useSpeedRunner(target?: ChartTarget | null) {
 
       lastLogTime = Date.now() / 1000
       loggedBytes = panel.bytesUsed
+      logUploadGeneration += 1
+      logUploadChain = Promise.resolve()
       speedSessionId = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
       startUse = panel.bytesUsed
       startTime = Date.now() / 1000
