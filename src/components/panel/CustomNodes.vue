@@ -99,6 +99,12 @@ function isValidUrl(url: string): boolean {
   return /https?:\/\/([\w-]+\.)+[\w-]+(:[0-9]+)?(\/\S*)?/.test(url)
 }
 
+async function validateCustomNodeConnectivity(url: string) {
+  const blockResult = checkBlockList(url)
+  if (!blockResult.status) return blockResult
+  return await validateSpeedNodeUrl(url)
+}
+
 async function addNode() {
   if (!label.value) {
     message.warning('请输入节点名称')
@@ -116,13 +122,7 @@ async function addNode() {
 
   checking.value = true
   const url = normalizeNodeUrl(value.value)
-  const blockResult = checkBlockList(url)
-  if (!blockResult.status) {
-    checking.value = false
-    message.error(blockResult.info)
-    return
-  }
-  const localResult = await validateSpeedNodeUrl(url)
+  const localResult = await validateCustomNodeConnectivity(url)
   if (!localResult.status) {
     checking.value = false
     message.error(`节点连通性检测失败：${localResult.info}`)
@@ -157,8 +157,9 @@ function openEditNode(node: CustomNode) {
   showEditModal.value = true
 }
 
-function submitEditNode() {
+async function submitEditNode() {
   if (!editingNode.value) return
+  if (checking.value) return
   if (!editForm.value.label.trim()) {
     message.warning('请输入节点名称')
     return
@@ -176,9 +177,17 @@ function submitEditNode() {
     message.warning(getCustomNodeDuplicateMessage(duplicate))
     return
   }
+  checking.value = true
+  const url = normalizeNodeUrl(editForm.value.value)
+  const localResult = await validateCustomNodeConnectivity(url)
+  checking.value = false
+  if (!localResult.status) {
+    message.error(`节点连通性检测失败：${localResult.info}`)
+    return
+  }
   const ok = nodesStore.updateCustomNode(editingNode.value, {
     label: normalizeNodeLabel(editForm.value.label),
-    value: normalizeNodeUrl(editForm.value.value),
+    value: url,
     group: editForm.value.group || '',
     method: editForm.value.method,
     postData: editForm.value.method === 'POST' ? editForm.value.postData : '',
@@ -676,7 +685,7 @@ onUnmounted(() => {
         />
         <div class="modal-actions">
           <NButton @click="showEditModal = false">取消</NButton>
-          <NButton type="primary" @click="submitEditNode">保存</NButton>
+          <NButton type="primary" :loading="checking" :disabled="checking" @click="submitEditNode">保存</NButton>
         </div>
       </div>
     </NModal>
