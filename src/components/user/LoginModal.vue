@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
+import { useClipboard } from '@vueuse/core'
 
 const props = defineProps<{
   show: boolean
@@ -17,7 +18,10 @@ const bindInput = ref('')
 const tokenMessage = ref('')
 const tokenMode = ref(false)
 const bindInputRef = ref<HTMLInputElement | null>(null)
+const { copy: copyToClipboard, copied: verifyCodeCopied } = useClipboard()
 
+const isWxmp = computed(() => userStore.loginChannelType === 'wxmp')
+const verifyDigits = computed(() => userStore.loginVerifyCode.padEnd(6, ' ').slice(0, 6).split(''))
 const canUseQr = computed(() => Boolean(userStore.loginQrImage))
 const canUseToken = computed(() => !userStore.isCheckingStatus)
 const qrUnavailableText = computed(() => {
@@ -81,8 +85,18 @@ function toggleTokenMode() {
 }
 
 function openQQLogin() {
-  if (!userStore.loginUrl) return
+  if (isWxmp.value || !userStore.loginUrl) return
   window.open(userStore.loginUrl, '_blank', 'width=500,height=600')
+}
+
+async function switchChannel(channelId: number) {
+  tokenMessage.value = ''
+  await userStore.selectLoginChannel(channelId)
+}
+
+function copyVerifyCode() {
+  if (!/^\d{6}$/.test(userStore.loginVerifyCode)) return
+  copyToClipboard(userStore.loginVerifyCode)
 }
 
 async function submitToken() {
@@ -132,8 +146,28 @@ function closeModal() {
           </div>
 
           <div class="login-body">
+            <div v-if="userStore.loginChannels.length > 1" class="channel-tabs" role="tablist" aria-label="登录方式">
+              <button
+                v-for="channel in userStore.loginChannels"
+                :key="channel.id"
+                type="button"
+                role="tab"
+                :aria-selected="channel.id === userStore.loginChannelId"
+                :class="{ active: channel.id === userStore.loginChannelId }"
+                :disabled="userStore.loginBusy"
+                @click="switchChannel(channel.id)"
+              >
+                {{ channel.name }}
+              </button>
+            </div>
+
+            <div v-if="isWxmp" class="wxmp-heading">
+              <strong>通过微信公众号登录</strong>
+              <span>微信扫码关注后，将下方验证码发送至公众号</span>
+            </div>
+
             <div class="qr-panel" :class="{ 'is-disabled': !canUseQr }" @click="refreshQr">
-              <img v-if="canUseQr" :src="userStore.loginQrImage" alt="QQ 登录二维码" />
+              <img v-if="canUseQr" :src="userStore.loginQrImage" :alt="isWxmp ? '微信公众号二维码' : 'QQ 登录二维码'" />
               <div v-else class="qr-placeholder">
                 <svg v-if="userStore.loginBusy || userStore.loginState === 'loading'" class="fl-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                   <path d="M12 3a9 9 0 1 1-6.36 2.64" />
@@ -142,6 +176,22 @@ function closeModal() {
               </div>
             </div>
 
+            <div v-if="isWxmp && userStore.loginWechatName" class="wechat-name">
+              {{ userStore.loginWechatName }}
+            </div>
+
+            <div v-if="isWxmp && userStore.loginVerifyCode" class="verify-code" aria-label="微信公众号登录验证码">
+              <button
+                v-for="(digit, index) in verifyDigits"
+                :key="index"
+                type="button"
+                :aria-label="`复制完整验证码，第 ${index + 1} 位为 ${digit}`"
+                title="复制完整验证码"
+                @click="copyVerifyCode"
+              >
+                {{ digit }}
+              </button>
+            </div>
             <div class="status-pill" :class="`state-${userStore.loginState}`">
               <span class="status-dot" />
               <span>{{ statusText }}</span>
@@ -165,6 +215,7 @@ function closeModal() {
 
             <div class="quick-login-row">
               <button
+                v-if="!isWxmp"
                 class="quick-action"
                 type="button"
                 :class="{ 'is-disabled': !userStore.loginUrl }"
@@ -176,6 +227,24 @@ function closeModal() {
                   <path d="M824.8 613.2c-16-51.4-34.4-94.6-62.7-165.3C766.5 262.2 689.3 112 511.5 112 331.7 112 256.2 265.2 261 447.9c-28.4 70.8-46.7 113.7-62.7 165.3-34 109.5-23 154.8-14.6 155.8 18 2.2 70.1-82.4 70.1-82.4 0 49 25.2 112.9 79.8 159-26.4 8.1-85.7 29.9-71.6 53.8 11.4 19.3 196.2 12.3 249.5 6.3 53.3 6 238.1 13 249.5-6.3 14.1-23.8-45.3-45.7-71.6-53.8 54.6-46.2 79.8-110.1 79.8-159 0 0 52.1 84.6 70.1 82.4 8.5-1.1 19.5-46.4-14.5-155.8z" fill="currentColor" />
                 </svg>
                 QQ 快捷登录
+              </button>
+              <button
+                v-else
+                class="quick-action"
+                type="button"
+                :class="{ 'is-disabled': !/^\d{6}$/.test(userStore.loginVerifyCode) }"
+                :disabled="!/^\d{6}$/.test(userStore.loginVerifyCode)"
+                aria-label="复制完整微信公众号验证码"
+                @click="copyVerifyCode"
+              >
+                <svg v-if="!verifyCodeCopied" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                {{ verifyCodeCopied ? '已复制' : '复制验证码' }}
               </button>
               <button
                 class="quick-action"
@@ -310,6 +379,65 @@ function closeModal() {
   padding: 18px 22px 16px;
 }
 
+.channel-tabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+
+.channel-tabs button {
+  min-width: 0;
+  height: 32px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.channel-tabs button.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-weight: 650;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.channel-tabs button:disabled {
+  cursor: wait;
+}
+
+.wxmp-heading {
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.wxmp-heading strong,
+.wxmp-heading span {
+  display: block;
+}
+
+.wxmp-heading strong {
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.wxmp-heading span {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .qr-panel {
   width: 186px;
   height: 186px;
@@ -355,6 +483,45 @@ function closeModal() {
 .qr-placeholder svg {
   width: 22px;
   height: 22px;
+}
+
+.wechat-name {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.verify-code {
+  display: grid;
+  grid-template-columns: repeat(6, 42px);
+  justify-content: center;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.verify-code button {
+  width: 42px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+}
+
+.verify-code button:hover,
+.verify-code button:focus-visible {
+  border-color: var(--text-muted);
+  outline: none;
 }
 
 .status-pill {
@@ -541,6 +708,17 @@ function closeModal() {
   .qr-panel img {
     width: 152px;
     height: 152px;
+  }
+
+  .verify-code {
+    grid-template-columns: repeat(6, 36px);
+    gap: 5px;
+  }
+
+  .verify-code button {
+    width: 36px;
+    height: 44px;
+    font-size: 20px;
   }
 }
 </style>

@@ -30,7 +30,7 @@ async function kickOther() {
   actionBusy.value = true
   actionMessage.value = ''
   const resp = await userStore.kickOtherDevices()
-  actionMessage.value = resp.status === 0 ? '其他设备已下线' : (resp.msg || '操作失败，请稍后再试')
+  actionMessage.value = resp.status === 0 ? '其他设备登录会话已清除' : (resp.msg || '操作失败，请稍后再试')
   actionBusy.value = false
 }
 

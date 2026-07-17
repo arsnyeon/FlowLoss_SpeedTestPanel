@@ -25,7 +25,7 @@ async function kickOther() {
   }
   const resp = await userStore.kickOtherDevices()
   if (resp.status === 0) {
-    actionMessage.value = '其他设备已下线'
+    actionMessage.value = '其他设备登录会话已清除'
   } else {
     actionMessage.value = '未知错误，请稍后再试'
   }

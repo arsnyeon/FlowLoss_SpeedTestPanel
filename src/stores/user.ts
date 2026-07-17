@@ -9,6 +9,18 @@ interface LoginCache {
   session?: string
   img?: string
   url?: string
+  channelId?: number
+  channelType?: string
+  channelName?: string
+  verifyCode?: string
+  wechatName?: string
+  expiresAt?: number
+}
+
+interface LoginChannel {
+  id: number
+  name: string
+  type: string
 }
 
 export interface SpeedLogMetadata {
@@ -34,6 +46,8 @@ export interface SpeedLogMetadata {
   isFinal?: boolean
 }
 
+const WXMP_VERIFY_CODE_TTL_MS = 5 * 60 * 1000
+
 export const useUserStore = defineStore('user', () => {
   const appStore = useAppStore()
   const isLoggedIn = ref(false)
@@ -49,6 +63,12 @@ export const useUserStore = defineStore('user', () => {
   const loginSession = ref('')
   const loginQrImage = ref('')
   const loginUrl = ref('')
+  const loginChannels = ref<LoginChannel[]>([])
+  const loginChannelId = ref(0)
+  const loginChannelType = ref('')
+  const loginChannelName = ref('')
+  const loginVerifyCode = ref('')
+  const loginWechatName = ref('')
   const loginMessage = ref('请使用 QQ/TIM 手机版扫描二维码')
   const loginError = ref('')
   const loginBusy = ref(false)
@@ -57,6 +77,8 @@ export const useUserStore = defineStore('user', () => {
   const API_URL = 'https://net.arsn.cn/api/'
   let loginTimer: number | null = null
   let dotsTimer: number | null = null
+  let loginRefreshTimer: number | null = null
+  let loginPollInFlight = false
   const speedLogSigners = new Map<string, SpeedLogSigner>()
   const speedLogQueues = new Map<string, Promise<any>>()
 
@@ -150,7 +172,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function saveLoginCache(cache: LoginCache) {
-    setCookie('loginData', JSON.stringify(cache), 120 * 1000)
+    setCookie('loginData', JSON.stringify(cache), WXMP_VERIFY_CODE_TTL_MS)
   }
 
   function clearLoginCache() {
@@ -163,7 +185,9 @@ export const useUserStore = defineStore('user', () => {
     loginSession.value = ''
     loginQrImage.value = ''
     loginUrl.value = ''
-    loginMessage.value = '请使用 QQ/TIM 手机版扫描二维码'
+    loginVerifyCode.value = ''
+    loginWechatName.value = ''
+    loginMessage.value = loginChannelType.value === 'wxmp' ? '请向微信公众号发送验证码' : '请使用 QQ/TIM 手机版扫描二维码'
     loginError.value = ''
     loginBusy.value = false
     loginDots.value = '.'
@@ -173,56 +197,128 @@ export const useUserStore = defineStore('user', () => {
     loginSession.value = cache.session || ''
     loginQrImage.value = cache.img || ''
     loginUrl.value = cache.url || ''
-    loginMessage.value = '请使用 QQ/TIM 手机版扫描二维码'
+    loginChannelId.value = cache.channelId || loginChannelId.value
+    loginChannelType.value = cache.channelType || loginChannelType.value
+    loginChannelName.value = cache.channelName || loginChannelName.value
+    loginVerifyCode.value = cache.verifyCode || ''
+    loginWechatName.value = cache.wechatName || ''
+    loginMessage.value = loginChannelType.value === 'wxmp'
+      ? `请向「${loginWechatName.value || loginChannelName.value}」发送验证码`
+      : '请使用 QQ/TIM 手机版扫描二维码'
     loginError.value = ''
     loginState.value = 'waiting'
   }
 
-  async function requestLoginQr(force = false) {
+  async function loadLoginChannels() {
+    const channels = await apiRequest('auth/channels')
+    loginChannels.value = Array.isArray(channels) ? channels : []
+    const selected = loginChannels.value.find((channel) => channel.id === loginChannelId.value)
+      || loginChannels.value.find((channel) => channel.type === 'qq')
+      || loginChannels.value[0]
+    if (selected) {
+      loginChannelId.value = selected.id
+      loginChannelType.value = selected.type
+      loginChannelName.value = selected.name
+    }
+    return loginChannels.value
+  }
+
+  async function requestLoginQr(force = false, channelId?: number) {
     loginBusy.value = true
     loginError.value = ''
     loginState.value = 'loading'
 
     try {
+      if (!loginChannels.value.length) await loadLoginChannels()
+      if (channelId) {
+        const selected = loginChannels.value.find((channel) => channel.id === channelId)
+        if (selected) {
+          loginChannelId.value = selected.id
+          loginChannelType.value = selected.type
+          loginChannelName.value = selected.name
+        }
+      }
+      if (!loginChannelId.value) throw new Error('暂无可用登录通道')
+
       const cache = readLoginCache()
-      if (!force && cache.session && cache.img) {
+      const cacheIsFresh = cache.channelType !== 'wxmp' || (cache.expiresAt || 0) > Date.now()
+      if (!force && cache.session && cache.img && cache.channelId === loginChannelId.value && cacheIsFresh) {
         applyLoginCache(cache)
         startLoginPolling()
+        scheduleWxmpLoginRefresh(cache.expiresAt)
         return { status: 0, cached: true }
       }
 
-      const resp = await apiRequest('auth/login', 'POST', { channelId: 1, AccessToken: getToken() || undefined })
-      if (resp.url) {
+      const resp = await apiRequest('auth/login', 'POST', { channelId: loginChannelId.value, AccessToken: getToken() || undefined })
+      if (resp.session && resp.qrcode) {
         const nextCache = {
           session: resp.session || '',
           img: resp.qrcode || '',
           url: resp.url || '',
+          channelId: resp.channelId || loginChannelId.value,
+          channelType: resp.type || loginChannelType.value,
+          channelName: resp.name || loginChannelName.value,
+          verifyCode: resp.verify_code || '',
+          wechatName: resp.wechat_name || '',
+          expiresAt: (resp.type || loginChannelType.value) === 'wxmp'
+            ? Date.now() + WXMP_VERIFY_CODE_TTL_MS
+            : undefined,
         }
         saveLoginCache(nextCache)
         applyLoginCache(nextCache)
         startLoginPolling()
+        scheduleWxmpLoginRefresh(nextCache.expiresAt)
       } else {
         loginState.value = 'failed'
         loginError.value = '获取登录二维码失败'
       }
       return { status: 0, ...resp }
-    } catch {
+    } catch (error: any) {
       loginState.value = 'failed'
-      loginError.value = '登录服务器异常，请稍后重试'
+      loginError.value = error?.message || '登录服务器异常，请稍后重试'
       return { status: -2, msg: loginError.value }
     } finally {
       loginBusy.value = false
     }
   }
 
+  async function selectLoginChannel(channelId: number) {
+    if (channelId === loginChannelId.value && loginState.value !== 'failed') return
+    stopLoginPolling()
+    clearLoginCache()
+    loginSession.value = ''
+    loginQrImage.value = ''
+    loginUrl.value = ''
+    loginVerifyCode.value = ''
+    loginWechatName.value = ''
+    await requestLoginQr(true, channelId)
+  }
+
   function startLoginPolling() {
     stopLoginPolling()
     loginTimer = window.setInterval(() => {
       pollQrLogin()
-    }, 1000)
+    }, 3000)
     dotsTimer = window.setInterval(() => {
       loginDots.value = loginDots.value.length >= 3 ? '.' : `${loginDots.value}.`
     }, 1000)
+  }
+
+  function scheduleWxmpLoginRefresh(expiresAt?: number) {
+    if (loginRefreshTimer !== null) {
+      window.clearTimeout(loginRefreshTimer)
+      loginRefreshTimer = null
+    }
+    if (loginChannelType.value !== 'wxmp' || !expiresAt) return
+
+    const delay = Math.max(0, expiresAt - Date.now())
+    loginRefreshTimer = window.setTimeout(() => {
+      loginRefreshTimer = null
+      if (loginState.value === 'waiting') {
+        stopLoginPolling()
+        requestLoginQr(true)
+      }
+    }, delay)
   }
 
   function stopLoginPolling() {
@@ -234,16 +330,23 @@ export const useUserStore = defineStore('user', () => {
       window.clearInterval(dotsTimer)
       dotsTimer = null
     }
+    if (loginRefreshTimer !== null) {
+      window.clearTimeout(loginRefreshTimer)
+      loginRefreshTimer = null
+    }
   }
 
   async function pollQrLogin() {
-    if (!loginSession.value) return { status: -5 }
+    if (!loginSession.value || loginPollInFlight) return { status: -5 }
+    loginPollInFlight = true
 
     try {
       const resp = await apiRequest('auth/check', 'POST', { session: loginSession.value })
       if (resp.code === -1) {
         loginState.value = 'waiting'
-        loginMessage.value = '请使用 QQ/TIM 手机版扫描二维码'
+        loginMessage.value = loginChannelType.value === 'wxmp'
+          ? `请向「${loginWechatName.value || loginChannelName.value}」发送验证码`
+          : '请使用 QQ/TIM 手机版扫描二维码'
       } else if (resp.code === -2) {
         loginState.value = 'binding'
         loginMessage.value = '请输入刚刚用于授权的 QQ 号码'
@@ -264,7 +367,7 @@ export const useUserStore = defineStore('user', () => {
         token.value = resp.AccessToken
         uin.value = resp.uin || ''
         username.value = resp.nickname || ''
-        avatar.value = resp.avatar || (resp.uin ? `https://q.qlogo.cn/headimg_dl?dst_uin=${encodeURIComponent(resp.uin)}&spec=640` : '')
+        avatar.value = resp.avatar || (loginChannelType.value === 'qq' && resp.uin ? `https://q.qlogo.cn/headimg_dl?dst_uin=${encodeURIComponent(resp.uin)}&spec=640` : '')
         isLoggedIn.value = true
         loginState.value = 'success'
         loginMessage.value = '登录成功'
@@ -277,6 +380,8 @@ export const useUserStore = defineStore('user', () => {
       loginError.value = '登录状态确认失败，请稍后重试'
       stopLoginPolling()
       return { status: -2, msg: loginError.value }
+    } finally {
+      loginPollInFlight = false
     }
   }
 
@@ -404,7 +509,8 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function kickOtherDevices() {
-    return await apiRequest('auth/kick', 'POST', { AccessToken: getToken() })
+    const resp = await apiRequest('auth/kick', 'POST', { AccessToken: getToken() })
+    return { ...resp, status: resp.status ?? resp.code }
   }
 
   return {
@@ -420,6 +526,12 @@ export const useUserStore = defineStore('user', () => {
     loginSession,
     loginQrImage,
     loginUrl,
+    loginChannels,
+    loginChannelId,
+    loginChannelType,
+    loginChannelName,
+    loginVerifyCode,
+    loginWechatName,
     loginMessage,
     loginError,
     loginBusy,
@@ -428,6 +540,8 @@ export const useUserStore = defineStore('user', () => {
     checkStatus,
     getToken,
     requestLoginQr,
+    loadLoginChannels,
+    selectLoginChannel,
     stopLoginPolling,
     resetLoginState,
     bindQQ,
